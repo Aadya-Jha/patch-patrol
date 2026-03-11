@@ -1,30 +1,29 @@
 import { queryOSVBatch } from "../services/vulnerabilityService.js"
+import { parseCVSS } from "cvss";
 
 function calculateRiskScore(vulns) {
-
-  let maxScore = 0
+  let maxScore = 0;
 
   for (const vuln of vulns) {
+    const vectorString = vuln.severity?.[0]?.score;
+    if (!vectorString) continue;
 
-    const cvss = vuln.severity?.[0]?.score
-
-    if (!cvss) continue
-
-    const score = parseFloat(cvss)
-
-    if (score > maxScore) {
-      maxScore = score
+    try {
+      const parsed = parseCVSS(vectorString);
+      const score = parsed.baseScore;
+      if (score > maxScore) maxScore = score;
+    } catch (e) {
+      continue;
     }
-
   }
 
-  if (maxScore >= 9) return "critical"
-  if (maxScore >= 7) return "high"
-  if (maxScore >= 4) return "medium"
-  if (maxScore > 0) return "low"
-
-  return "low"
+  if (maxScore >= 9) return "critical";
+  if (maxScore >= 7) return "high";
+  if (maxScore >= 4) return "medium";
+  if (maxScore > 0) return "low";
+  return "none";
 }
+
 
 export async function scanDependencies(dependencies, ecosystem) {
 
