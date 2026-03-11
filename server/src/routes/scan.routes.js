@@ -2,6 +2,8 @@ import express from "express";
 import { getFile } from "../services/github.service.js";
 import { parsePackageJSON, parseRequirementsTxt, parsePomXml } from "../services/parser.service.js";
 import { getPool } from "../db/db.js";
+import { scanDependencies } from "../scanners/dependencyScanner.js";
+import { all } from "axios";
 
 const router = express.Router();
 
@@ -69,9 +71,52 @@ router.post("/scan", async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    const byEcosystem = {};
+    allDependencies.forEach(dep => {
+      if (!byEcosystem[dep.ecosystem])byEcosystem[dep.ecosystem] = [];
+      byEcosystem[dep.ecosystem].push(dep);
+    });
+
+    let allVulnerabilities = [];
+    for (const [ecosystem, deps] of Object.entries(byEcosystem)) {
+      const results  = await scanDependencies(deps, ecosystem);
+      allVulnerabilities = allVulnerabilities.concat(results);
+    };
+
+    for (const item of allVulnerabilities) {
+      const depRow = await pool.query(
+        `SELECT id FROM dependencies WHERE scan_id=$1 AND package_name=$2 AND version=$3`,
+        [scanId, item.dependency, item.version]
+    );
+    if (!depRow.rows.length) continue;
+    const depId = depRow.rows[0].id;
+
+    for (const vuln of item.vulnerabilities) {
+      await pool.query(
+        `INSERT INTO vulnerabilities(package_name, cve_id, severity, description)
+        VALUES($1, $2, $3, $4)
+        ON CONFLICT (cve_id) DO NOTHING`,
+        [item.dependency, vuln.id, item.risk, vuln.summary]
+      );
+
+      const vulnRow = await pool.query(
+        `SELECT id FROM vulnerabilities WHERE cve_id=$1`,
+        [vuln.id]
+      );
+      const vulnId = vulnRow.rows[0].id;
+
+      await pool.query(
+        `INSERT INTO dependency_vulnerabilities(dependency_id, vulnerability_id)
+        VALUES($1, $2)`,
+        [depId, vulnId]
+      );
+    }
+  }
     res.json(allDependencies);
   } catch (err) {
     if (client) await client.query("ROLLBACK");
+    console.log(err);
     res.status(500).json({ error: "Scan processing failed" });
   } finally {
     if (client) client.release();

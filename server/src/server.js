@@ -8,7 +8,7 @@ const PORT = 5000;
 
 app.get("/db-test", async (req, res) => {
   try {
-    const result = await getPool().query("SELECT NOW()");  // pool created HERE, env is ready
+    const result = await getPool().query("SELECT NOW()");  
     res.json(result.rows);
   } catch (err) {
     console.error(err);
