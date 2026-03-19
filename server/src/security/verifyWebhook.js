@@ -1,22 +1,13 @@
-import crypto from "crypto"
+import crypto from "crypto";
 
-export function verifyGithubWebhook(req, res, buf) {
+export function computeGithubWebhookSignature(secret, payloadBuffer) {
+  return `sha256=${crypto.createHmac("sha256", secret).update(payloadBuffer).digest("hex")}`;
+}
 
-  const signature = req.headers["x-hub-signature-256"]
+export function isValidGithubWebhookSignature(secret, payloadBuffer, signature) {
+  const expectedSignature = computeGithubWebhookSignature(secret, payloadBuffer);
+  const provided = Buffer.from(signature, "utf8");
+  const expected = Buffer.from(expectedSignature, "utf8");
 
-  if (!signature) {
-    throw new Error("Missing GitHub signature")
-  }
-
-  const hmac = crypto.createHmac(
-    "sha256",
-    process.env.GITHUB_WEBHOOK_SECRET
-  )
-
-  const digest = "sha256=" + hmac.update(buf).digest("hex")
-
-  if (signature !== digest) {
-    throw new Error("Invalid webhook signature")
-  }
-
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
 }

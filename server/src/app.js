@@ -1,19 +1,28 @@
-import express from "express";
 import cors from "cors";
-import testRoutes from "./routes/test.routes.js";
-import webhookRoutes from "./routes/webhook.routes.js";
+import express from "express";
+import repoRoutes from "./routes/repo.routes.js";
 import scanRoutes from "./routes/scan.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
+import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
-app.use(testRoutes);
-app.use(webhookRoutes);
-app.use(scanRoutes);
 
-app.get('/', (req,res) => {
-    res.send("server is running");
+app.get("/", (req, res) => {
+  res.json({ status: "ok", service: "patch-patrol" });
 });
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.use("/api/webhooks/github", webhookRoutes);
+app.use(express.json({ limit: "1mb" }));
+app.use("/api/repos", repoRoutes);
+app.use("/api/scans", scanRoutes);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;
