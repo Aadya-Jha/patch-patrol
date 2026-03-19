@@ -1,5 +1,7 @@
 import { getPool } from "../db/db.js";
 import { HttpError } from "../middlewares/errorHandler.js";
+import { buildRiskExplanationContext } from "./aiContext.service.js";
+import { generateRiskExplanation, getAiPrototypeSettings } from "./aiRisk.service.js";
 import { fetchDependencyFiles } from "./github.service.js";
 import { parsePackageJSON, parsePomXml, parseRequirementsTxt } from "./parser.service.js";
 import { getRepositoryByName, getRepositorySummary, getRepositoryToken } from "./repository.service.js";
@@ -57,6 +59,78 @@ function summarizeVulnerabilities(matches) {
   }
 
   return summary;
+}
+
+async function getAiCandidates(owner, repo, scanId) {
+  const scanDetail = await getScanDetailById(owner, repo, scanId);
+  const candidates = [];
+
+  for (const dependency of scanDetail.dependencies) {
+    for (const vulnerability of dependency.vulnerabilities) {
+      candidates.push({
+        repository: scanDetail.repository,
+        dependency,
+        vulnerability,
+        repositorySummary: scanDetail.summary,
+      });
+    }
+  }
+
+  candidates.sort((left, right) => (right.vulnerability.riskScore || 0) - (left.vulnerability.riskScore || 0));
+
+  return candidates;
+}
+
+export async function generateAiExplanationsForScan({ owner, repo, scanId, force = false }) {
+  const candidates = await getAiCandidates(owner, repo, scanId);
+  if (!candidates.length) {
+    return getScanDetailById(owner, repo, scanId);
+  }
+
+  const settings = getAiPrototypeSettings();
+  const pool = getPool();
+  let remainingModelBudget = settings.maxModelExplanationsPerScan;
+
+  for (const candidate of candidates) {
+    if (!force && candidate.vulnerability.aiExplanation) {
+      continue;
+    }
+
+    const context = buildRiskExplanationContext(candidate);
+    const useModel = remainingModelBudget > 0;
+    const result = await generateRiskExplanation(context, { useModel });
+
+    if (result.provider !== "prototype-fallback") {
+      remainingModelBudget -= 1;
+    }
+
+    await pool.query(
+      `
+        UPDATE scan_vulnerabilities
+        SET
+          ai_explanation = $1,
+          ai_provider = $2,
+          ai_model = $3,
+          ai_generated_at = CURRENT_TIMESTAMP
+        WHERE
+          scan_id = $4
+          AND dependency_id = $5
+          AND vulnerability_id = (
+            SELECT id FROM vulnerabilities WHERE cve_id = $6
+          )
+      `,
+      [
+        result.explanation,
+        result.provider,
+        result.model,
+        scanId,
+        candidate.dependency.id,
+        candidate.vulnerability.advisoryId,
+      ],
+    );
+  }
+
+  return getScanDetailById(owner, repo, scanId);
 }
 
 export async function runRepositoryScan({ owner, repo, triggerSource = "manual" }) {
@@ -214,7 +288,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     client.release();
   }
 
-  return getScanDetailById(owner, repo, scanId);
+  return generateAiExplanationsForScan({ owner, repo, scanId });
 }
 
 export async function listRepositoryScans(owner, repo) {
@@ -282,6 +356,10 @@ export async function getScanDetailById(owner, repo, scanId) {
         sv.dependency_id,
         sv.risk_level,
         sv.risk_score,
+        sv.ai_explanation,
+        sv.ai_provider,
+        sv.ai_model,
+        sv.ai_generated_at,
         sv.suggested_fix,
         v.cve_id,
         v.source,
@@ -305,6 +383,10 @@ export async function getScanDetailById(owner, repo, scanId) {
       severity: row.severity,
       riskLevel: row.risk_level,
       riskScore: Number(row.risk_score),
+      aiExplanation: row.ai_explanation,
+      aiProvider: row.ai_provider,
+      aiModel: row.ai_model,
+      aiGeneratedAt: row.ai_generated_at,
       description: row.description,
       referenceUrl: row.reference_url,
       suggestedFix: row.suggested_fix,
@@ -335,6 +417,12 @@ export async function getScanDetailById(owner, repo, scanId) {
     summary: {
       dependencyCount: dependencies.length,
       vulnerabilityCount: vulnerabilityResult.rows.length,
+      ai: {
+        provider: getAiPrototypeSettings().provider,
+        model: getAiPrototypeSettings().model,
+        embeddingModel: getAiPrototypeSettings().embeddingModel,
+        vectorStore: getAiPrototypeSettings().vectorStore,
+      },
       severities: summarizeVulnerabilities(
         Object.values(vulnerabilitiesByDependencyId).map((vulnerabilities) => ({
           vulnerabilities,

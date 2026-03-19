@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS scan_vulnerabilities (
   risk_level VARCHAR(20),
   risk_score FLOAT,
   ai_explanation TEXT,
+  ai_provider VARCHAR(50),
+  ai_model VARCHAR(100),
+  ai_generated_at TIMESTAMP,
   suggested_fix TEXT,
   UNIQUE (scan_id, dependency_id, vulnerability_id)
 );
