@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react'
+import { getLatestVersion } from '../api/registry'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -7,6 +9,18 @@ function getRiskLevel(severities) {
   if (severities?.medium > 0) return { label: 'Medium Risk', color: 'text-yellow-400', border: 'border-yellow-800', bg: 'bg-yellow-950' }
   if (severities?.low > 0) return { label: 'Low Risk', color: 'text-green-400', border: 'border-green-800', bg: 'bg-green-950' }
   return { label: 'No Risk Detected', color: 'text-slate-400', border: 'border-slate-700', bg: 'bg-slate-900' }
+}
+
+function getVersionGap(current, latest) {
+  if (!current || !latest) return null
+  const clean = v => v.replace(/[\^~>=<]/g, '').trim()
+  const c = clean(current).split('.').map(Number)
+  const l = clean(latest).split('.').map(Number)
+  
+  if (l[0] > c[0]) return { label: `${latest} available`, level: 'major', color: 'text-red-400' }
+  if (l[1] > c[1]) return { label: `${latest} available`, level: 'minor', color: 'text-yellow-400' }
+  if (l[2] > c[2]) return { label: `${latest} available`, level: 'patch', color: 'text-blue-400' }
+  return { label: 'Up to date', level: 'current', color: 'text-green-400' }
 }
 
 const COLORS = {
@@ -20,6 +34,23 @@ export default function ScanResults() {
   const { state } = useLocation()
   const navigate = useNavigate()
   const scan = state?.scan
+  const dependencies = scan?.dependencies || []  // ← move this up
+  const [latestVersions, setLatestVersions] = useState({})
+
+  useEffect(() => {
+    if (!dependencies.length) return
+    
+    async function fetchVersions() {
+      const versions = {}
+      for (const dep of dependencies) {
+        const latest = await getLatestVersion(dep.name, dep.ecosystem)
+        if (latest) versions[dep.name] = latest
+      }
+      setLatestVersions(versions)
+    }
+    
+    fetchVersions()
+  }, [dependencies.length])
 
   if (!scan) {
     return (
@@ -29,7 +60,7 @@ export default function ScanResults() {
     )
   }
 
-  const { repository, summary, dependencies } = scan
+  const { repository, summary } = scan
   const risk = getRiskLevel(summary.severities)
 
   const chartData = Object.entries(summary.severities || {})
@@ -144,6 +175,14 @@ export default function ScanResults() {
                 <span className="font-semibold">{dep.name}</span>
                 <span className="text-slate-400 text-sm ml-2">v{dep.version}</span>
                 <span className="text-slate-500 text-xs ml-2">{dep.ecosystem}</span>
+                {latestVersions[dep.name] && (() => {
+                  const gap = getVersionGap(dep.version, latestVersions[dep.name])
+                  return (
+                  <span className={`text-xs ml-2 ${gap.color}`}>
+                    {gap.level !== 'current' && '↑ '}{gap.label}
+                  </span>
+                  )
+                  })()}
               </div>
               {dep.vulnerabilities.length > 0 && (
                 <span className="text-xs bg-red-900 text-red-300 px-2 py-1 rounded">
