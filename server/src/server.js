@@ -3,7 +3,6 @@ import app from "./app.js";
 import { closePool } from "./db/db.js";
 
 dotenv.config();
-
 const PORT = Number(process.env.PORT || 5000);
 
 const server = app.listen(PORT, () => {

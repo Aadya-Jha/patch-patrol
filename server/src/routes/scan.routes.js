@@ -3,7 +3,7 @@ import { regenerateAiExplanations, triggerScan } from "../controllers/scan.contr
 import { requireApiKey } from "../middlewares/auth.js";
 
 const router = express.Router();
-
+router.post("/", triggerScan);
 router.use(requireApiKey);
 router.post("/", triggerScan);
 router.post("/:scanId/explanations", regenerateAiExplanations);
