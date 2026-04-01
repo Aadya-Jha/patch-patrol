@@ -10,10 +10,12 @@ function parseForceFlag(value) {
 
 export async function triggerScan(req, res, next) {
   try {
+    console.log("triggerScan called", req.body)
     const { owner, repo } = req.body;
     const scan = await runRepositoryScan({ owner, repo, triggerSource: "manual" });
     res.status(201).json(scan);
   } catch (error) {
+    console.error("triggerScan error:", error)
     next(error);
   }
 }

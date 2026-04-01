@@ -7,18 +7,27 @@ import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:5173", 
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+}));
+
+app.use(express.json({ limit: "1mb" }));
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "patch-patrol" });
 });
-
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+app.use((req, res, next) => {
+  console.log(req.method, req.path);
+  next();
+});
+
 app.use("/api/webhooks/github", webhookRoutes);
-app.use(express.json({ limit: "1mb" }));
 app.use("/api/repos", repoRoutes);
 app.use("/api/scans", scanRoutes);
 

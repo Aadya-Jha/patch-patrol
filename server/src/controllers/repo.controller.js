@@ -7,7 +7,12 @@ import { getScanDetailById, listRepositoryScans } from "../services/scan.service
 
 export async function createRepository(req, res, next) {
   try {
-    const repository = await registerRepository(req.body);
+    const { owner, repo } = req.body;
+    const repository = await registerRepository({ 
+      owner, 
+      repo, 
+      githubToken: process.env.GITHUB_TOKEN 
+    });
     res.status(201).json(repository);
   } catch (error) {
     next(error);

@@ -2,6 +2,7 @@ import { HttpError } from "./errorHandler.js";
 
 export function requireApiKey(req, res, next) {
   const configuredToken = process.env.APP_API_TOKEN;
+  console.log("APP_API_TOKEN:", configuredToken)
 
   if (!configuredToken) {
     return next();
