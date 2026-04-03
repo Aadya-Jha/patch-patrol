@@ -8,6 +8,7 @@ import { parsePackageJSON, parsePomXml, parseRequirementsTxt } from "./parser.se
 import { getRepositoryByName, getRepositorySummary, getRepositoryToken } from "./repository.service.js";
 import { queryVulnerabilitiesForDependencies } from "./vulnerabilityService.js";
 import { analyzeTransitiveDependencies } from "./transitiveAnalyzer.service.js";
+import { createIssuesForScan } from "../services/githubAutomation.service.js";
 
 const PARSERS = {
   "package.json": parsePackageJSON,
@@ -304,7 +305,26 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     client.release();
   }
 
-  return generateAiExplanationsForScan({ owner, repo, scanId });
+  const aiResult = await generateAiExplanationsForScan({ owner, repo, scanId });
+
+  const vulnRows = await getPool().query(
+    `SELECT sv.risk_score, sv.risk_level, sv.ai_explanation, sv.suggested_fix,
+            v.cve_id, v.severity, d.package_name
+     FROM scan_vulnerabilities sv
+     JOIN vulnerabilities v ON v.id = sv.vulnerability_id
+     JOIN dependencies d ON d.id = sv.dependency_id
+     WHERE sv.scan_id = $1`,
+    [scanId]
+  );
+
+  await createIssuesForScan({
+    owner,
+    repo,
+    token: githubToken,
+    vulnerabilities: vulnRows.rows,
+  });
+
+  return aiResult;
 }
 
 export async function listRepositoryScans(owner, repo) {
