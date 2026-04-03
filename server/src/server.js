@@ -1,9 +1,10 @@
 import dotenv from "dotenv";
+dotenv.config({ path: "./.env" });
 import app from "./app.js";
 import { closePool } from "./db/db.js";
 
-dotenv.config();
 const PORT = Number(process.env.PORT || 5000);
+console.log("ENV:", process.env.SLACK_WEBHOOK_URL);
 
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
