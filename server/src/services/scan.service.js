@@ -9,6 +9,7 @@ import { getRepositoryByName, getRepositorySummary, getRepositoryToken } from ".
 import { queryVulnerabilitiesForDependencies } from "./vulnerabilityService.js";
 import { analyzeTransitiveDependencies } from "./transitiveAnalyzer.service.js";
 import { createIssuesForScan } from "../services/githubAutomation.service.js";
+import { sendScanNotifications } from "./notification.service.js";
 
 const PARSERS = {
   "package.json": parsePackageJSON,
@@ -323,6 +324,9 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     token: githubToken,
     vulnerabilities: vulnRows.rows,
   });
+
+  await createIssuesForScan({ owner, repo, token: githubToken, vulnerabilities: vulnRows.rows });
+  await sendScanNotifications({ owner, repo, scanId, vulnerabilities: vulnRows.rows });
 
   return aiResult;
 }

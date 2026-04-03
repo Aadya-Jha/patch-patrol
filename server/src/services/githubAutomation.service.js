@@ -5,15 +5,10 @@ const GITHUB_API = "https://api.github.com";
 export async function createIssuesForScan({ owner, repo, token, vulnerabilities }) {
   if (!token) throw new Error("GITHUB_TOKEN not set");
 
-  console.log(`[githubAutomation] raw vulns:`, vulnerabilities.map(
-    v => ({ cve_id: v.cve_id, severity: v.severity, risk_score: v.risk_score })
-  ));
-
   const highOrCritical = vulnerabilities.filter((v) => {
     const s = (v.severity || v.risk_level)?.toUpperCase();
     return s === "CRITICAL" || s === "HIGH";
   });
-  console.log(`[githubAutomation] creating issues for ${highOrCritical.length} vulns`);
 
 
   if (!highOrCritical.length) return [];
@@ -28,7 +23,6 @@ export async function createIssuesForScan({ owner, repo, token, vulnerabilities 
       console.error(`failed to create issue for ${vuln.cve_id}:`, err.message);
     }
   }
-  console.log(`[githubAutomation] done, created:`, created);
   return created;
 }
 
