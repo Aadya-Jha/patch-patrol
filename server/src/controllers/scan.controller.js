@@ -1,4 +1,5 @@
 import { generateAiExplanationsForScan, runRepositoryScan } from "../services/scan.service.js";
+import { runPatchSimulation } from "../services/patchSimulation.service.js";
 
 function parseForceFlag(value) {
   if (value === undefined) {
@@ -32,5 +33,18 @@ export async function regenerateAiExplanations(req, res, next) {
     res.status(200).json(scan);
   } catch (error) {
     next(error);
+  }
+}
+
+export async function simulatePatch(req, res, next) {
+  try {
+    const { owner, repo, packageName, targetVersion } = req.body;
+    if (!owner || !repo || !packageName) {
+      return res.status(400).json({ error: "owner, repo and packageName are required" });
+    }
+    const result = await runPatchSimulation({ owner, repo, packageName, targetVersion });
+    res.json(result);
+  } catch (err) {
+    next(err);
   }
 }
