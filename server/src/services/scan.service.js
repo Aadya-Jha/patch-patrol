@@ -3,9 +3,11 @@ import { HttpError } from "../middlewares/errorHandler.js";
 import { buildRiskExplanationContext } from "./aiContext.service.js";
 import { generateRiskExplanation, getAiPrototypeSettings } from "./aiRisk.service.js";
 import { fetchDependencyFiles } from "./github.service.js";
+import { createSecurityIssue } from "./github.service.js";
 import { parsePackageJSON, parsePomXml, parseRequirementsTxt } from "./parser.service.js";
 import { getRepositoryByName, getRepositorySummary, getRepositoryToken } from "./repository.service.js";
 import { queryVulnerabilitiesForDependencies } from "./vulnerabilityService.js";
+import { analyzeTransitiveDependencies } from "./transitiveAnalyzer.service.js";
 
 const PARSERS = {
   "package.json": parsePackageJSON,
@@ -160,6 +162,11 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     vulnerabilityMatches = vulnerabilityMatches.concat(matches);
   }
 
+  vulnerabilityMatches = analyzeTransitiveDependencies(
+  dependencies,
+  vulnerabilityMatches
+  );
+
   const pool = getPool();
   const client = await pool.connect();
   let scanId;
@@ -204,7 +211,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
           dependency.dependencyType,
         ],
       );
-
+      
       dependencyIds.set(dependency.key, insertedDependency.rows[0].id);
     }
 
@@ -268,6 +275,15 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
             vulnerability.suggestedFix,
           ],
         );
+        if (vulnerability.riskScore >= 9) {
+      console.log("Creating GitHub issue for:", match.dependencyKey);
+
+      await createSecurityIssue(owner, repo, githubToken, {
+      dependencyKey: match.dependencyKey,
+      highestRisk: vulnerability.riskScore,
+      vulnerabilities: [vulnerability],
+     });
+     }
       }
     }
 

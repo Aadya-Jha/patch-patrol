@@ -105,3 +105,91 @@ export async function fetchDependencyFiles(owner, repo, token) {
 
   return files;
 }
+
+export async function securityIssueExists(owner, repo, token, dependencyKey) {
+  const response = await githubClient.get(
+    `/repos/${owner}/${repo}/issues`,
+    {
+      headers: buildHeaders(token),
+      params: {
+        state: "open",
+        labels: "security"
+      }
+    }
+  );
+
+  const issues = response.data;
+
+  return issues.some(issue =>
+    issue.title.includes(dependencyKey)
+  );
+}
+
+export async function createSecurityIssue(owner, repo, token, vulnerability) {
+
+  const exists = await securityIssueExists(owner, repo, token, vulnerability.dependencyKey);
+
+  if (exists) {
+    console.log("Security issue already exists for:", vulnerability.dependencyKey);
+    return;
+  }
+
+  const vulnerabilityList = vulnerability.vulnerabilities
+    .map(v => {
+      const cveLink = `https://nvd.nist.gov/vuln/detail/${v.advisoryId}`;
+      const fix = v.suggestedFix
+        ? `Suggested Fix: ${v.suggestedFix}`
+        : "Suggested Fix: Upgrade to the latest secure version";
+
+      return `• ${v.advisoryId}
+Severity: ${v.severity}
+Description: ${v.details}
+CVE Link: ${cveLink}
+${fix}`;
+    })
+    .join("\n\n");
+
+  const issueTitle = `Critical Vulnerability: ${vulnerability.dependencyKey}`;
+
+  const issueBody = `
+🚨 Critical Dependency Vulnerability Detected
+
+Repository: ${owner}/${repo}
+
+Affected Dependency: ${vulnerability.dependencyKey}
+
+Risk Score: ${vulnerability.highestRisk}
+
+-------------------------------------
+
+Vulnerabilities Found:
+
+${vulnerabilityList}
+
+-------------------------------------
+
+Recommended Action:
+Upgrade the dependency to the latest secure version.
+
+Generated automatically by Patch Patrol.
+`;
+
+  try {
+    await githubClient.post(
+      `/repos/${owner}/${repo}/issues`,
+      {
+        title: issueTitle,
+        body: issueBody,
+        labels: ["security", "vulnerability"]
+      },
+      {
+        headers: buildHeaders(token)
+      }
+    );
+
+    console.log("Security issue created for:", vulnerability.dependencyKey);
+
+  } catch (error) {
+    console.error("Failed to create GitHub security issue:", error.message);
+  }
+}
