@@ -15,7 +15,7 @@
 
 **Embedding + vector DB (large-scale, context-aware)**
 
-- Preprocess vulnerability data into vector embeddings (e.g., OpenAI embeddings).
+- Preprocess vulnerability data into vector embeddings via provider-routed models (for example, OpenRouter-routed OpenAI embeddings).
 - Store embeddings in a vector DB (Pinecone, Weaviate, Milvus).
 - AI query flow:
   1. Developer opens dashboard or triggers a scan.
@@ -52,7 +52,7 @@
 
 **Embedding + vector DB (large-scale, context-aware)**
 
-- Preprocess vulnerability data into vector embeddings (e.g., OpenAI embeddings).
+- Preprocess vulnerability data into vector embeddings via provider-routed models (for example, OpenRouter-routed OpenAI embeddings).
 - Store embeddings in a vector DB (Pinecone, Weaviate, Milvus).
 - AI query flow:
   1. Developer opens dashboard or triggers a scan.
