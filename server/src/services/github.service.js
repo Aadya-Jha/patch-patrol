@@ -90,7 +90,11 @@ export async function getFile(owner, repo, path, token) {
 export async function fetchDependencyFiles(owner, repo, token) {
   const manifests = [
     { path: "package.json", ecosystem: "npm" },
+    { path: "package-lock.json", ecosystem: "npm" },
+    { path: "yarn.lock", ecosystem: "npm" },
     { path: "requirements.txt", ecosystem: "pypi" },
+    { path: "Pipfile.lock", ecosystem: "pypi" },
+    { path: "poetry.lock", ecosystem: "pypi" },
     { path: "pom.xml", ecosystem: "maven" },
   ];
 

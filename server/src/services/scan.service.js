@@ -325,7 +325,6 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     vulnerabilities: vulnRows.rows,
   });
 
-  await createIssuesForScan({ owner, repo, token: githubToken, vulnerabilities: vulnRows.rows });
   await sendScanNotifications({ owner, repo, scanId, vulnerabilities: vulnRows.rows });
 
   return aiResult;
