@@ -1,22 +1,54 @@
-
-
 const GITHUB_API = "https://api.github.com";
 
-export async function createIssuesForScan({ owner, repo, token, vulnerabilities }) {
+async function issueExistsForCVE(owner, repo, token, cveId) {
+  try {
+    const res = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/issues?state=open&labels=security,patch-patrol`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+
+    if (!res.ok) {
+      console.warn(`Failed to check existing issues: ${res.status}`);
+      return false; // Assume no issue exists if we can't check
+    }
+
+    const issues = await res.json();
+    return issues.some((issue) => issue.title.includes(cveId));
+  } catch (err) {
+    console.error(
+      `Error checking for existing CVE issue ${cveId}:`,
+      err.message,
+    );
+    return false; // Assume no issue exists if check fails
+  }
+}
+
+export async function createIssuesForScan({
+  owner,
+  repo,
+  token,
+  vulnerabilities,
+}) {
   if (!token) throw new Error("GITHUB_TOKEN not set");
 
-  const highOrCritical = vulnerabilities.filter((v) => {
-    const s = (v.severity || v.risk_level)?.toUpperCase();
-    return s === "CRITICAL" || s === "HIGH";
-  });
-
-
-  if (!highOrCritical.length) return [];
+  if (!vulnerabilities.length) return [];
 
   const created = [];
 
-  for (const vuln of highOrCritical) {
+  for (const vuln of vulnerabilities) {
     try {
+      const exists = await issueExistsForCVE(owner, repo, token, vuln.cve_id);
+      if (exists) {
+        console.log(`Issue already exists for CVE ${vuln.cve_id}, skipping`);
+        continue;
+      }
+
       const issue = await openIssue({ owner, repo, token, vuln });
       created.push(issue);
     } catch (err) {
@@ -39,7 +71,13 @@ async function openIssue({ owner, repo, token, vuln }) {
     },
     body: JSON.stringify({
       title: `[PatchPatrol] ${severity}: ${cve_id} in ${package_name}`,
-      body: buildBody({ cve_id, package_name, severity, cvss_score, ai_explanation }),
+      body: buildBody({
+        cve_id,
+        package_name,
+        severity,
+        cvss_score,
+        ai_explanation,
+      }),
       labels: ["security", "patch-patrol"],
     }),
   });
@@ -53,7 +91,13 @@ async function openIssue({ owner, repo, token, vuln }) {
   return { cve_id, issue_url: data.html_url };
 }
 
-function buildBody({ cve_id, package_name, severity, cvss_score, ai_explanation }) {
+function buildBody({
+  cve_id,
+  package_name,
+  severity,
+  cvss_score,
+  ai_explanation,
+}) {
   return `**Package:** ${package_name}
 **CVE:** ${cve_id} (https://osv.dev/vulnerability/${cve_id})
 **Severity:** ${severity} — CVSS ${cvss_score ?? "N/A"}

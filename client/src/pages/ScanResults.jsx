@@ -8,6 +8,7 @@ function getRiskLevel(severities) {
   if (severities?.high > 0) return { label: 'High Risk', color: 'text-orange-400', border: 'border-orange-800', bg: 'bg-orange-950' }
   if (severities?.medium > 0) return { label: 'Medium Risk', color: 'text-yellow-400', border: 'border-yellow-800', bg: 'bg-yellow-950' }
   if (severities?.low > 0) return { label: 'Low Risk', color: 'text-green-400', border: 'border-green-800', bg: 'bg-green-950' }
+  if (severities?.unknown > 0) return { label: 'Unknown Risk', color: 'text-gray-400', border: 'border-gray-700', bg: 'bg-gray-900' }
   return { label: 'No Risk Detected', color: 'text-slate-400', border: 'border-slate-700', bg: 'bg-slate-900' }
 }
 
@@ -28,6 +29,7 @@ const COLORS = {
   high: '#fb923c',
   medium: '#facc15',
   low: '#4ade80',
+  unknown: '#64748b',
 }
 
 export default function ScanResults() {
@@ -102,7 +104,7 @@ export default function ScanResults() {
       {/* Summary cards + Chart */}
       <div className="grid grid-cols-2 gap-6 mb-8">
         {/* Severity cards */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
             <p className="text-slate-400 text-sm">Dependencies</p>
             <p className="text-2xl font-bold">{summary.dependencyCount}</p>
@@ -126,6 +128,10 @@ export default function ScanResults() {
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
             <p className="text-slate-400 text-sm">Low</p>
             <p className="text-2xl font-bold text-green-400">{summary.severities?.low || 0}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+            <p className="text-slate-400 text-sm">Unknown</p>
+            <p className="text-2xl font-bold text-gray-400">{summary.severities?.unknown || 0}</p>
           </div>
         </div>
 
@@ -201,7 +207,8 @@ export default function ScanResults() {
                         vuln.severity === 'critical' ? 'bg-red-900 text-red-300' :
                         vuln.severity === 'high' ? 'bg-orange-900 text-orange-300' :
                         vuln.severity === 'medium' ? 'bg-yellow-900 text-yellow-300' :
-                        'bg-slate-700 text-slate-300'
+                        vuln.severity === 'low' ? 'bg-green-900 text-green-300' :
+                        'bg-gray-700 text-gray-300'
                       }`}>
                         {vuln.severity}
                       </span>
