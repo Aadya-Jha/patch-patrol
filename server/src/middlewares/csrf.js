@@ -7,8 +7,8 @@ export function csrfTokenMiddleware(req, res, next) {
     const token = crypto.randomBytes(32).toString("hex");
     res.cookie("csrfToken", token, {
       httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: "/",
     });
