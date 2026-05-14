@@ -8,7 +8,7 @@ test("encryptToken and decryptToken round-trip the GitHub token", () => {
   const token = "github_pat_example";
   const encrypted = encryptToken(token);
   const decrypted = decryptToken({
-    encrypted_token: encrypted.encryptedToken,
+    access_token_encrypted: encrypted.encryptedToken,
     iv_hex: encrypted.ivHex,
     auth_tag_hex: encrypted.authTagHex,
   });

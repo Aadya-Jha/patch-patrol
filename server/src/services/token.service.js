@@ -3,7 +3,6 @@ import { HttpError } from "../middlewares/errorHandler.js";
 
 function getEncryptionKey() {
   const rawKey = process.env.ENCRYPTION_KEY;
-
   if (!rawKey) {
     throw new HttpError(500, "ENCRYPTION_KEY is not configured");
   }
@@ -18,7 +17,7 @@ function getEncryptionKey() {
       return base64Key;
     }
   } catch {
-    // Ignore invalid base64 and fall back to a derived key.
+    // Ignore invalid base64
   }
 
   return crypto.createHash("sha256").update(rawKey).digest();
@@ -42,21 +41,26 @@ export function encryptToken(token) {
 }
 
 export function decryptToken(record) {
-  if (!record?.encrypted_token || !record?.iv_hex || !record?.auth_tag_hex) {
+  if (!record?.access_token_encrypted || !record?.iv_hex || !record?.auth_tag_hex) {
     throw new HttpError(500, "Stored GitHub token is incomplete");
   }
 
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
     getEncryptionKey(),
-    Buffer.from(record.iv_hex, "hex"),
+    Buffer.from(record.iv_hex, "hex")
   );
   decipher.setAuthTag(Buffer.from(record.auth_tag_hex, "hex"));
 
   const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(record.encrypted_token, "base64")),
+    decipher.update(Buffer.from(record.access_token_encrypted, "base64")),
     decipher.final(),
   ]);
 
   return decrypted.toString("utf8");
+}
+
+export function rotateEncryptionKey(_oldKeyHex, _newKeyBase64) {
+  // Placeholder for future key rotation implementation
+  throw new HttpError(501, "Encryption key rotation not implemented");
 }
