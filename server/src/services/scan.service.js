@@ -4,11 +4,15 @@ import { buildRiskExplanationContext } from "./aiContext.service.js";
 import { generateRiskExplanation, getAiPrototypeSettings } from "./aiRisk.service.js";
 import { fetchDependencyFiles } from "./github.service.js";
 import { parsePackageJSON, parsePomXml, parseRequirementsTxt } from "./parser.service.js";
-import { getRepositoryByName, getRepositorySummary, getRepositoryToken } from "./repository.service.js";
+import {
+  getRepositoryByName,
+  getRepositorySummary,
+} from "./repository.service.js";
 import { queryVulnerabilitiesForDependencies } from "./vulnerabilityService.js";
 import { analyzeTransitiveDependencies } from "./transitiveAnalyzer.service.js";
-import { createIssuesForScan } from "../services/githubAutomation.service.js";
+import { createIssuesForScan } from "./githubAutomation.service.js";
 import { sendScanNotifications } from "./notification.service.js";
+import { logAudit, getActiveAccountToken } from "./oauth.service.js";
 
 const PARSERS = {
   "package.json": parsePackageJSON,
@@ -64,8 +68,8 @@ function summarizeVulnerabilities(matches) {
   return summary;
 }
 
-async function getAiCandidates(owner, repo, scanId) {
-  const scanDetail = await getScanDetailById(owner, repo, scanId);
+async function getAiCandidates(owner, repo, scanId, accountId = null) {
+  const scanDetail = await getScanDetailById(owner, repo, scanId, accountId);
   const candidates = [];
 
   for (const dependency of scanDetail.dependencies) {
@@ -84,10 +88,10 @@ async function getAiCandidates(owner, repo, scanId) {
   return candidates;
 }
 
-export async function generateAiExplanationsForScan({ owner, repo, scanId, force = false }) {
-  const candidates = await getAiCandidates(owner, repo, scanId);
+export async function generateAiExplanationsForScan({ owner, repo, scanId, force = false, accountId = null }) {
+  const candidates = await getAiCandidates(owner, repo, scanId, accountId);
   if (!candidates.length) {
-    return getScanDetailById(owner, repo, scanId);
+    return getScanDetailById(owner, repo, scanId, accountId);
   }
 
   const settings = getAiPrototypeSettings();
@@ -129,16 +133,22 @@ export async function generateAiExplanationsForScan({ owner, repo, scanId, force
         scanId,
         candidate.dependency.id,
         candidate.vulnerability.advisoryId,
-      ],
+      ]
     );
   }
 
   return getScanDetailById(owner, repo, scanId);
 }
 
-export async function runRepositoryScan({ owner, repo, triggerSource = "manual" }) {
-  const repository = await getRepositoryByName(owner, repo);
-  const githubToken = await getRepositoryToken(owner, repo);
+export async function runRepositoryScan({ owner, repo, triggerSource = "manual", accountId = null }) {
+  let repository;
+  if (accountId) {
+    repository = await getRepositoryByName(owner, repo, accountId);
+  } else {
+    repository = await getRepositoryByName(owner, repo);
+  }
+
+  const githubToken = await getActiveAccountToken(repository.account_id);
   const files = await fetchDependencyFiles(owner, repo, githubToken);
 
   if (!files.length) {
@@ -163,10 +173,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
     vulnerabilityMatches = vulnerabilityMatches.concat(matches);
   }
 
-  vulnerabilityMatches = analyzeTransitiveDependencies(
-  dependencies,
-  vulnerabilityMatches
-  );
+  vulnerabilityMatches = analyzeTransitiveDependencies(dependencies, vulnerabilityMatches);
 
   const pool = getPool();
   const client = await pool.connect();
@@ -181,10 +188,11 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
         VALUES ($1, $2, 'processing')
         RETURNING id, started_at
       `,
-      [repository.id, triggerSource],
+      [repository.id, triggerSource]
     );
 
     scanId = scanResult.rows[0].id;
+
     const dependencyIds = new Map();
 
     for (const dependency of dependencies) {
@@ -210,9 +218,9 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
           dependency.ecosystem,
           dependency.manifestPath,
           dependency.dependencyType,
-        ],
+        ]
       );
-      
+
       dependencyIds.set(dependency.key, insertedDependency.rows[0].id);
     }
 
@@ -250,7 +258,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
             vulnerability.details,
             vulnerability.referenceUrl,
             vulnerability.publishedAt,
-          ],
+          ]
         );
 
         await client.query(
@@ -274,7 +282,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
             vulnerability.severity,
             vulnerability.riskScore,
             vulnerability.suggestedFix,
-          ],
+          ]
         );
       }
     }
@@ -285,7 +293,7 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
         SET status = 'completed', completed_at = CURRENT_TIMESTAMP
         WHERE id = $1
       `,
-      [scanId],
+      [scanId]
     );
 
     await client.query("COMMIT");
@@ -295,8 +303,6 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
   } finally {
     client.release();
   }
-
-  const aiResult = await generateAiExplanationsForScan({ owner, repo, scanId });
 
   const vulnRows = await getPool().query(
     `SELECT sv.risk_score, sv.risk_level, sv.ai_explanation, sv.suggested_fix,
@@ -317,11 +323,26 @@ export async function runRepositoryScan({ owner, repo, triggerSource = "manual" 
 
   await sendScanNotifications({ owner, repo, scanId, vulnerabilities: vulnRows.rows });
 
-  return aiResult;
+  if (accountId) {
+    await logAudit(pool, {
+      accountId,
+      action: "scan_trigger",
+      resourceType: "scan",
+      resourceId: scanId,
+      metadata: { owner, repo, triggerSource },
+    });
+  }
+
+  return getScanDetailById(owner, repo, scanId);
 }
 
-export async function listRepositoryScans(owner, repo) {
-  const repository = await getRepositorySummary(owner, repo);
+export async function listRepositoryScans(owner, repo, accountId = null) {
+  let repository;
+  if (accountId) {
+    repository = await getRepositorySummary(owner, repo, accountId);
+  } else {
+    repository = await getRepositorySummary(owner, repo);
+  }
 
   const result = await getPool().query(
     `
@@ -341,21 +362,27 @@ export async function listRepositoryScans(owner, repo) {
       GROUP BY s.id
       ORDER BY s.started_at DESC
     `,
-    [repository.id],
+    [repository.id]
   );
 
   return result.rows;
 }
 
-export async function getScanDetailById(owner, repo, scanId) {
-  const repository = await getRepositoryByName(owner, repo);
+export async function getScanDetailById(owner, repo, scanId, accountId = null) {
+  let repository;
+  if (accountId) {
+    repository = await getRepositoryByName(owner, repo, accountId);
+  } else {
+    repository = await getRepositorySummary(owner, repo);
+  }
+
   const scanResult = await getPool().query(
     `
       SELECT id, trigger_source, status, error_message, started_at, completed_at
       FROM scans
       WHERE id = $1 AND repo_id = $2
     `,
-    [scanId, repository.id],
+    [scanId, repository.id]
   );
 
   if (!scanResult.rows.length) {
@@ -376,7 +403,7 @@ export async function getScanDetailById(owner, repo, scanId) {
       WHERE d.scan_id = $1
       ORDER BY d.ecosystem, d.package_name
     `,
-    [scanId],
+    [scanId]
   );
 
   const vulnerabilityResult = await getPool().query(
@@ -401,7 +428,7 @@ export async function getScanDetailById(owner, repo, scanId) {
       WHERE sv.scan_id = $1
       ORDER BY sv.risk_score DESC NULLS LAST, v.cve_id
     `,
-    [scanId],
+    [scanId]
   );
 
   const vulnerabilitiesByDependencyId = vulnerabilityResult.rows.reduce((grouped, row) => {
@@ -455,7 +482,7 @@ export async function getScanDetailById(owner, repo, scanId) {
       severities: summarizeVulnerabilities(
         Object.values(vulnerabilitiesByDependencyId).map((vulnerabilities) => ({
           vulnerabilities,
-        })),
+        }))
       ),
     },
     dependencies,
