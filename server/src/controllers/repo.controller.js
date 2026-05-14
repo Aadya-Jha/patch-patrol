@@ -8,11 +8,13 @@ import { getScanDetailById, listRepositoryScans } from "../services/scan.service
 export async function createRepository(req, res, next) {
   try {
     const { owner, repo } = req.body;
-    const repository = await registerRepository({ 
-      owner, 
-      repo, 
-      githubToken: process.env.GITHUB_TOKEN 
-    });
+    const accountId = req.accountId;
+
+    if (!accountId) {
+      return next(new Error("Authentication required"));
+    }
+
+    const repository = await registerRepository({ owner, repo, accountId });
     res.status(201).json(repository);
   } catch (error) {
     next(error);
@@ -21,7 +23,8 @@ export async function createRepository(req, res, next) {
 
 export async function listRepositoriesHandler(req, res, next) {
   try {
-    const repositories = await listRepositories();
+    const accountId = req.accountId; // Will be null for unauthenticated (optionalAuth)
+    const repositories = await listRepositories(accountId || undefined);
     res.json(repositories);
   } catch (error) {
     next(error);
@@ -30,7 +33,9 @@ export async function listRepositoriesHandler(req, res, next) {
 
 export async function getRepositoryHandler(req, res, next) {
   try {
-    const repository = await getRepositorySummary(req.params.owner, req.params.repo);
+    const { owner, repo } = req.params;
+    const accountId = req.accountId;
+    const repository = await getRepositorySummary(owner, repo, accountId || undefined);
     res.json(repository);
   } catch (error) {
     next(error);
@@ -39,7 +44,9 @@ export async function getRepositoryHandler(req, res, next) {
 
 export async function listRepositoryScansHandler(req, res, next) {
   try {
-    const scans = await listRepositoryScans(req.params.owner, req.params.repo);
+    const { owner, repo } = req.params;
+    const accountId = req.accountId;
+    const scans = await listRepositoryScans(owner, repo, accountId || undefined);
     res.json(scans);
   } catch (error) {
     next(error);
@@ -48,7 +55,9 @@ export async function listRepositoryScansHandler(req, res, next) {
 
 export async function getRepositoryScanHandler(req, res, next) {
   try {
-    const scan = await getScanDetailById(req.params.owner, req.params.repo, Number(req.params.scanId));
+    const { owner, repo, scanId } = req.params;
+    const accountId = req.accountId;
+    const scan = await getScanDetailById(owner, repo, Number(scanId), accountId || undefined);
     res.json(scan);
   } catch (error) {
     next(error);

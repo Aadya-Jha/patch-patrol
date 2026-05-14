@@ -1,7 +1,7 @@
 import { getPool } from "../db/db.js";
 import { HttpError } from "../middlewares/errorHandler.js";
 import { fetchRepository } from "./github.service.js";
-import { decryptToken, encryptToken } from "./token.service.js";
+import { getActiveAccountToken } from "./oauth.service.js";
 
 export const GITHUB_NAME_REGEX = /^[A-Za-z0-9_.-]+$/;
 
@@ -11,84 +11,64 @@ function validateOwnerAndRepo(owner, repo) {
   }
 }
 
-function mapRepositoryRow(row) {
-  if (!row) {
-    return null;
-  }
+export function mapRepositoryRow(row) {
+  if (!row) return null;
 
   return {
     id: row.id,
     owner: row.owner,
     name: row.name,
     defaultBranch: row.default_branch,
-    installationId: row.installation_id,
-    accountName: row.account_name,
+    accountId: row.account_id,
+    accountName: row.account_name || row.username,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     latestScanAt: row.latest_scan_at,
   };
 }
 
-export async function registerRepository({ owner, repo, githubToken }) {
+export async function registerRepository({ owner, repo, accountId }) {
   validateOwnerAndRepo(owner, repo);
 
-  const metadata = await fetchRepository(owner, repo, githubToken);
-  const encryptedToken = encryptToken(githubToken);
+  const token = await getActiveAccountToken(accountId);
+  const metadata = await fetchRepository(owner, repo, token);
+
   const pool = getPool();
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    const installationResult = await client.query(
-      `
-        INSERT INTO github_installations (
-          github_account_id,
-          account_name,
-          encrypted_token,
-          iv_hex,
-          auth_tag_hex
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (github_account_id)
-        DO UPDATE SET
-          account_name = EXCLUDED.account_name,
-          encrypted_token = EXCLUDED.encrypted_token,
-          iv_hex = EXCLUDED.iv_hex,
-          auth_tag_hex = EXCLUDED.auth_tag_hex,
-          installed_at = CURRENT_TIMESTAMP
-        RETURNING id
-      `,
-      [
-        metadata.githubAccountId,
-        metadata.accountName,
-        encryptedToken.encryptedToken,
-        encryptedToken.ivHex,
-        encryptedToken.authTagHex,
-      ],
-    );
-
     const repositoryResult = await client.query(
       `
-        INSERT INTO repositories (installation_id, owner, name, default_branch)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (owner, name)
-        DO UPDATE SET
-          installation_id = EXCLUDED.installation_id,
-          default_branch = EXCLUDED.default_branch,
-          updated_at = CURRENT_TIMESTAMP,
-          is_active = TRUE
-        RETURNING id, owner, name, default_branch, installation_id, created_at, updated_at
-      `,
-      [installationResult.rows[0].id, metadata.owner, metadata.repo, metadata.defaultBranch],
+      INSERT INTO repositories (account_id, owner, name, default_branch, installation_id)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (owner, name) DO UPDATE SET
+        account_id = EXCLUDED.account_id,
+        default_branch = EXCLUDED.default_branch,
+        installation_id = EXCLUDED.installation_id,
+        updated_at = CURRENT_TIMESTAMP,
+        is_active = TRUE
+      RETURNING id, owner, name, default_branch, account_id, created_at, updated_at
+    `,
+      [accountId, metadata.owner, metadata.repo, metadata.defaultBranch, null]
+    );
+
+    await client.query(
+      `INSERT INTO audit_logs (account_id, action, resource_type, resource_id, metadata)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        accountId,
+        "repository_register",
+        "repository",
+        repositoryResult.rows[0].id,
+        JSON.stringify({ owner, repo }),
+      ]
     );
 
     await client.query("COMMIT");
 
-    return {
-      ...mapRepositoryRow(repositoryResult.rows[0]),
-      accountName: metadata.accountName,
-    };
+    return mapRepositoryRow(repositoryResult.rows[0]);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -97,48 +77,83 @@ export async function registerRepository({ owner, repo, githubToken }) {
   }
 }
 
-export async function listRepositories() {
-  const result = await getPool().query(
-    `
+export async function listRepositories(accountId = null) {
+  const pool = getPool();
+  let query;
+  let params;
+
+  if (accountId) {
+    query = `
       SELECT
         r.id,
         r.owner,
         r.name,
         r.default_branch,
-        r.installation_id,
+        r.account_id,
         r.created_at,
         r.updated_at,
-        gi.account_name,
+        ga.username as account_name,
         MAX(s.completed_at) AS latest_scan_at
       FROM repositories r
-      LEFT JOIN github_installations gi ON gi.id = r.installation_id
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
+      LEFT JOIN scans s ON s.repo_id = r.id
+      WHERE r.account_id = $1 AND r.is_active = TRUE
+      GROUP BY r.id, ga.username
+      ORDER BY r.owner, r.name
+    `;
+    params = [accountId];
+  } else {
+    query = `
+      SELECT
+        r.id,
+        r.owner,
+        r.name,
+        r.default_branch,
+        r.account_id,
+        r.created_at,
+        r.updated_at,
+        ga.username as account_name,
+        MAX(s.completed_at) AS latest_scan_at
+      FROM repositories r
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
       LEFT JOIN scans s ON s.repo_id = r.id
       WHERE r.is_active = TRUE
-      GROUP BY r.id, gi.account_name
+      GROUP BY r.id, ga.username
       ORDER BY r.owner, r.name
-    `,
-  );
+    `;
+    params = [];
+  }
 
+  const result = await pool.query(query, params);
   return result.rows.map(mapRepositoryRow);
 }
 
-export async function getRepositoryByName(owner, repo) {
+export async function getRepositoryByName(owner, repo, accountId = null) {
   validateOwnerAndRepo(owner, repo);
 
-  const result = await getPool().query(
-    `
-      SELECT
-        r.*,
-        gi.account_name,
-        gi.encrypted_token,
-        gi.iv_hex,
-        gi.auth_tag_hex
+  const pool = getPool();
+  let query;
+  let params;
+
+  if (accountId) {
+    query = `
+      SELECT r.*, ga.username as account_name
       FROM repositories r
-      LEFT JOIN github_installations gi ON gi.id = r.installation_id
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
+      WHERE r.owner = $1 AND r.name = $2 AND r.account_id = $3 AND r.is_active = TRUE
+    `;
+    params = [owner, repo, accountId];
+  } else {
+    query = `
+      SELECT r.*, ga.username as account_name
+      FROM repositories r
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
       WHERE r.owner = $1 AND r.name = $2 AND r.is_active = TRUE
-    `,
-    [owner, repo],
-  );
+    `;
+    params = [owner, repo];
+  }
+
+  const result = await pool.query(query, params);
 
   if (!result.rows.length) {
     throw new HttpError(404, "Repository is not registered");
@@ -147,27 +162,52 @@ export async function getRepositoryByName(owner, repo) {
   return result.rows[0];
 }
 
-export async function getRepositorySummary(owner, repo) {
-  const result = await getPool().query(
-    `
+export async function getRepositorySummary(owner, repo, accountId = null) {
+  const pool = getPool();
+  let query;
+  let params;
+
+  if (accountId) {
+    query = `
       SELECT
         r.id,
         r.owner,
         r.name,
         r.default_branch,
-        r.installation_id,
+        r.account_id,
         r.created_at,
         r.updated_at,
-        gi.account_name,
+        ga.username as account_name,
         MAX(s.completed_at) AS latest_scan_at
       FROM repositories r
-      LEFT JOIN github_installations gi ON gi.id = r.installation_id
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
+      LEFT JOIN scans s ON s.repo_id = r.id
+      WHERE r.owner = $1 AND r.name = $2 AND r.account_id = $3 AND r.is_active = TRUE
+      GROUP BY r.id, ga.username
+    `;
+    params = [owner, repo, accountId];
+  } else {
+    query = `
+      SELECT
+        r.id,
+        r.owner,
+        r.name,
+        r.default_branch,
+        r.account_id,
+        r.created_at,
+        r.updated_at,
+        ga.username as account_name,
+        MAX(s.completed_at) AS latest_scan_at
+      FROM repositories r
+      LEFT JOIN github_accounts ga ON ga.id = r.account_id
       LEFT JOIN scans s ON s.repo_id = r.id
       WHERE r.owner = $1 AND r.name = $2 AND r.is_active = TRUE
-      GROUP BY r.id, gi.account_name
-    `,
-    [owner, repo],
-  );
+      GROUP BY r.id, ga.username
+    `;
+    params = [owner, repo];
+  }
+
+  const result = await pool.query(query, params);
 
   if (!result.rows.length) {
     throw new HttpError(404, "Repository is not registered");
@@ -179,9 +219,9 @@ export async function getRepositorySummary(owner, repo) {
 export async function getRepositoryToken(owner, repo) {
   const repository = await getRepositoryByName(owner, repo);
 
-  if (repository.installation_id) {
-    return decryptToken(repository);
+  if (!repository.account_id) {
+    throw new HttpError(500, "No GitHub token is available for this repository");
   }
 
-  throw new HttpError(500, "No GitHub token is available for this repository");
+  return await getActiveAccountToken(repository.account_id);
 }

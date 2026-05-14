@@ -1,5 +1,4 @@
 import express from "express";
-import { requireApiKey } from "../middlewares/auth.js";
 import {
   createRepository,
   getRepositoryHandler,
@@ -7,11 +6,14 @@ import {
   listRepositoriesHandler,
   listRepositoryScansHandler,
 } from "../controllers/repo.controller.js";
+import { requireAuth } from "../middlewares/session.js";
+import { validate } from "../middlewares/validation.js";
+import { ownerRepoSchema } from "../middlewares/validation.js";
 
 const router = express.Router();
 
-router.use(requireApiKey);
-router.post("/", createRepository);
+router.use(requireAuth);
+router.post("/", validate(ownerRepoSchema), createRepository);
 router.get("/", listRepositoriesHandler);
 router.get("/:owner/:repo", getRepositoryHandler);
 router.get("/:owner/:repo/scans", listRepositoryScansHandler);
