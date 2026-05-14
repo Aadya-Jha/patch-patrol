@@ -52,7 +52,7 @@ export default function ScanResults() {
     }
     
     fetchVersions()
-  }, [dependencies.length])
+  }, [dependencies])
 
   if (!scan) {
     return (
@@ -65,9 +65,9 @@ export default function ScanResults() {
   const { repository, summary } = scan
   const risk = getRiskLevel(summary.severities)
 
-  const chartData = Object.entries(summary.severities || {})
-    .filter(([_, count]) => count > 0)
-    .map(([severity, count]) => ({
+   const chartData = Object.entries(summary.severities || {})
+     .filter(([, count]) => count > 0)
+     .map(([severity, count]) => ({
       name: severity.charAt(0).toUpperCase() + severity.slice(1),
       value: count,
       color: COLORS[severity] || '#94a3b8'
