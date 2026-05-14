@@ -9,7 +9,7 @@ export function csrfTokenMiddleware(req, res, next) {
     res.cookie("csrfToken", token, {
       httpOnly: false,
       secure: true,
-      sameSite: "none",
+      sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: "/",
     });

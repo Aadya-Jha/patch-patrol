@@ -143,8 +143,8 @@ export async function handleGitHubCallback(req, res, next) {
       res
         .cookie("session", sessionToken, {
           httpOnly: true,
-          secure: true, // Always true since we are on Vercel/HTTPS
-          sameSite: "none", // Required for cross-site cookies between different Vercel domains
+          secure: true,
+          sameSite: "lax",
           maxAge: 24 * 60 * 60 * 1000,
           path: "/",
         })
@@ -182,7 +182,7 @@ export async function logoutHandler(req, res) {
       path: "/",
       httpOnly: true,
       secure: true,
-      sameSite: "none",
+      sameSite: "lax",
     })
     .status(200)
     .json({ success: true, message: "Logged out successfully" });
