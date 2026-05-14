@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { HttpError } from "./errorHandler.js";
 
 // Generate a CSRF token and set it as a non-httpOnly cookie
 export function csrfTokenMiddleware(req, res, next) {
