@@ -1,25 +1,86 @@
-CREATE TABLE IF NOT EXISTS github_installations (
+-- ============================================================
+-- Patch Patrol - Production-Ready Database Schema
+-- GitHub OAuth & Repository Access Management
+-- ============================================================
+
+-- GitHub user accounts (OAuth identity)
+CREATE TABLE IF NOT EXISTS github_accounts (
   id SERIAL PRIMARY KEY,
-  github_account_id VARCHAR(255) UNIQUE NOT NULL,
-  account_name VARCHAR(255) NOT NULL,
-  encrypted_token TEXT NOT NULL,
-  iv_hex VARCHAR(32) NOT NULL,
-  auth_tag_hex VARCHAR(32) NOT NULL,
-  installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  github_user_id VARCHAR(255) UNIQUE NOT NULL,
+  username VARCHAR(255) NOT NULL,
+  email VARCHAR(255),
+  avatar_url TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Encrypted GitHub access tokens (OAuth or GitHub App)
+CREATE TABLE IF NOT EXISTS github_tokens (
+  id SERIAL PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES github_accounts(id) ON DELETE CASCADE,
+  token_type VARCHAR(50) NOT NULL CHECK (token_type IN ('oauth', 'app_installation', 'fallback')),
+  access_token_encrypted TEXT NOT NULL,
+  iv_hex VARCHAR(32) NOT NULL,
+  auth_tag_hex VARCHAR(32) NOT NULL,
+  scope TEXT, -- comma-separated scopes
+  expires_at TIMESTAMP NULL, -- NULL = non-expiring token (legacy PAT)
+  installation_id INTEGER NULL, -- GitHub App installation ID (if applicable)
+  token_metadata JSONB DEFAULT '{}', -- additional data (refresh_token, refresh_expires_at, etc.)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TIMESTAMP NULL,
+  revoked_at TIMESTAMP NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  UNIQUE (account_id, token_type)
+);
+
+-- OAuth state/PKCE storage for CSRF protection
+CREATE TABLE IF NOT EXISTS oauth_sessions (
+  id SERIAL PRIMARY KEY,
+  state VARCHAR(255) UNIQUE NOT NULL,
+  pkce_verifier_hash VARCHAR(255) NOT NULL,
+  code_verifier_encrypted TEXT NOT NULL,
+  code_verifier_iv VARCHAR(32) NOT NULL,
+  code_verifier_tag VARCHAR(32) NOT NULL,
+  account_id INTEGER REFERENCES github_accounts(id),
+  redirect_uri TEXT,
+  ip_address INET,
+  user_agent TEXT,
+  used_at TIMESTAMP NULL,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expires ON oauth_sessions(expires_at) WHERE expires_at > NOW();
+
+-- Audit log for security tracking
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id SERIAL PRIMARY KEY,
+  account_id INTEGER REFERENCES github_accounts(id),
+  action VARCHAR(100) NOT NULL,
+  resource_type VARCHAR(50), -- 'repository', 'scan', 'token', 'oauth'
+  resource_id INTEGER,
+  ip_address INET,
+  user_agent TEXT,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Existing tables (unchanged but with FK improvements)
 CREATE TABLE IF NOT EXISTS repositories (
   id SERIAL PRIMARY KEY,
-  installation_id INTEGER REFERENCES github_installations(id),
+  account_id INTEGER NOT NULL REFERENCES github_accounts(id) ON DELETE CASCADE,
+  installation_id INTEGER NULL,
   owner VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
   default_branch VARCHAR(255),
   is_active BOOLEAN DEFAULT TRUE,
+  visibility VARCHAR(50) DEFAULT 'unknown', -- 'public', 'private', 'internal'
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (owner, name)
 );
 
+-- Existing tables remain compatible
 CREATE TABLE IF NOT EXISTS scans (
   id SERIAL PRIMARY KEY,
   repo_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
@@ -66,7 +127,13 @@ CREATE TABLE IF NOT EXISTS scan_vulnerabilities (
   UNIQUE (scan_id, dependency_id, vulnerability_id)
 );
 
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_github_accounts_user_id ON github_accounts(github_user_id);
+CREATE INDEX IF NOT EXISTS idx_github_tokens_account ON github_tokens(account_id, token_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_oauth_sessions_state ON oauth_sessions(state) WHERE expires_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_audit_logs_account ON audit_logs(account_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_repositories_owner_name ON repositories(owner, name);
+CREATE INDEX IF NOT EXISTS idx_repositories_account ON repositories(account_id);
 CREATE INDEX IF NOT EXISTS idx_scans_repo_id ON scans(repo_id);
 CREATE INDEX IF NOT EXISTS idx_dependencies_scan_id ON dependencies(scan_id);
 CREATE INDEX IF NOT EXISTS idx_vulnerabilities_cve_id ON vulnerabilities(cve_id);
