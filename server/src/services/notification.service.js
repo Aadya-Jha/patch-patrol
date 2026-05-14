@@ -16,33 +16,41 @@ export async function sendScanNotifications({ owner, repo, scanId, vulnerabiliti
 }
 
 async function sendSlackAlert({ owner, repo, scanId, summary, webhook }) {
-  const res = await fetch(webhook, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: `*PatchPatrol Scan Complete — ${owner}/${repo}*`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*PatchPatrol Scan Complete*\nRepo: \`${owner}/${repo}\``,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            { type: "mrkdwn", text: `*Total Vulns:*\n${summary.total}` },
-            { type: "mrkdwn", text: `*Critical:*\n${summary.critical}` },
-            { type: "mrkdwn", text: `*High:*\n${summary.high}` },
-            { type: "mrkdwn", text: `*Scan ID:*\n${scanId}` },
-          ],
-        },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
+  try {
+    const res = await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: `*PatchPatrol Scan Complete — ${owner}/${repo}*`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*PatchPatrol Scan Complete*\nRepo: \`${owner}/${repo}\``,
+            },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: `*Total Vulns:*\n${summary.total}` },
+              { type: "mrkdwn", text: `*Critical:*\n${summary.critical}` },
+              { type: "mrkdwn", text: `*High:*\n${summary.high}` },
+              { type: "mrkdwn", text: `*Scan ID:*\n${scanId}` },
+            ],
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function buildSummary(vulnerabilities) {

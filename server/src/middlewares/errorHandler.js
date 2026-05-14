@@ -11,7 +11,7 @@ export function notFoundHandler(req, res, next) {
   next(new HttpError(404, "Route not found"));
 }
 
-export function errorHandler(err, req, res, next) {
+export function errorHandler(err, _req, res, _next) {
   const statusCode = err.statusCode || 500;
   const message = statusCode >= 500 ? "Internal server error" : err.message;
 
