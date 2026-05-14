@@ -60,9 +60,7 @@ export default function Home() {
   }
 
   const handleLogin = () => {
-    const backend = import.meta.env.VITE_BACKEND_URL;
-    const base = backend ? `${backend.replace(/\/$/, '')}/api` : '/api';
-    window.location.href = `${base}/auth/github`;
+    window.location.href = `/api/auth/github`;
   }
 
   const handleLogout = async () => {
