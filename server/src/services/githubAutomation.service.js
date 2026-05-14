@@ -2,24 +2,32 @@ const GITHUB_API = "https://api.github.com";
 
 async function issueExistsForCVE(owner, repo, token, cveId) {
   try {
-    const res = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/issues?state=open&labels=security,patch-patrol`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const res = await fetch(
+        `${GITHUB_API}/repos/${owner}/${repo}/issues?state=open&labels=security,patch-patrol`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          signal: controller.signal,
         },
-      },
-    );
+      );
 
-    if (!res.ok) {
-      console.warn(`Failed to check existing issues: ${res.status}`);
-      return false; // Assume no issue exists if we can't check
+      if (!res.ok) {
+        console.warn(`Failed to check existing issues: ${res.status}`);
+        return false; // Assume no issue exists if we can't check
+      }
+
+      const issues = await res.json();
+      return issues.some((issue) => issue.title.includes(cveId));
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const issues = await res.json();
-    return issues.some((issue) => issue.title.includes(cveId));
   } catch (err) {
     console.error(
       `Error checking for existing CVE issue ${cveId}:`,
@@ -61,34 +69,42 @@ export async function createIssuesForScan({
 async function openIssue({ owner, repo, token, vuln }) {
   const { cve_id, package_name, severity, cvss_score, ai_explanation } = vuln;
 
-  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/issues`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      title: `[PatchPatrol] ${severity}: ${cve_id} in ${package_name}`,
-      body: buildBody({
-        cve_id,
-        package_name,
-        severity,
-        cvss_score,
-        ai_explanation,
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: `[PatchPatrol] ${severity}: ${cve_id} in ${package_name}`,
+        body: buildBody({
+          cve_id,
+          package_name,
+          severity,
+          cvss_score,
+          ai_explanation,
+        }),
+        labels: ["security", "patch-patrol"],
       }),
-      labels: ["security", "patch-patrol"],
-    }),
-  });
+      signal: controller.signal,
+    });
 
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message);
+    }
+
+    const data = await res.json();
+    return { cve_id, issue_url: data.html_url };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = await res.json();
-  return { cve_id, issue_url: data.html_url };
 }
 
 function buildBody({
